@@ -1,0 +1,91 @@
+name: Release
+
+# Tests, builds and publishes a danio release here. danio's source is
+# private (Loudomian/danio); its publish script (scripts/publish.ts) tags a
+# version there and starts this run. This repository is public, so its
+# Actions minutes are free: the tests run here, first, and nothing is
+# built or published unless they pass.
+#
+# This file only lays out the jobs. Their steps are in the source, at the
+# tag being released (.github/actions/test, addon and release), so they
+# change with the code they test and build.
+#
+# Run by hand: Actions → Release → Run workflow, with an existing tag. A
+# tag already published gets its files and notes replaced.
+#
+# Secrets (Settings → Secrets and variables → Actions):
+#   SOURCE_TOKEN        reads Loudomian/danio (fine-grained, Contents: read)
+#   DANIO_SIGNING_KEY   the release key (PEM); its public half is in
+#                       danio's internal/update
+#   DEEPSEEK_API_KEY    for the release notes; without it the commit
+#                       titles are listed
+# Variables: DEEPSEEK_MODEL.
+on:
+  repository_dispatch:
+    types: [release]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release (e.g. v0.1.0-rc.2)
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event.client_payload.tag || inputs.tag }}
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event.client_payload.tag || inputs.tag }}
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Loudomian/danio
+          ref: ${{ env.TAG }}
+          token: ${{ secrets.SOURCE_TOKEN }}
+          persist-credentials: false
+      - uses: ./.github/actions/test
+
+  addon:
+    name: Blender add-on
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Loudomian/danio
+          ref: ${{ env.TAG }}
+          token: ${{ secrets.SOURCE_TOKEN }}
+          persist-credentials: false
+      - uses: ./.github/actions/addon
+
+  release:
+    name: Build and publish
+    needs: [test, addon]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Loudomian/danio
+          ref: ${{ env.TAG }}
+          token: ${{ secrets.SOURCE_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/release
+        with:
+          tag: ${{ env.TAG }}
+          token: ${{ github.token }}
+          signing-key: ${{ secrets.DANIO_SIGNING_KEY }}
+          deepseek-key: ${{ secrets.DEEPSEEK_API_KEY }}
+          deepseek-model: ${{ vars.DEEPSEEK_MODEL }}
