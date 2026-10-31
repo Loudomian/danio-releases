@@ -130,15 +130,11 @@ jobs:
           tag=$(sh ffmpeg/build.sh tag)
           version=${tag#ffmpeg-}
           cat >notes.md <<EOF
-          danio 使用的 FFmpeg $version：只编进 danio 用到的部分（libx264、ProRes 编码，PNG、JPEG、TIFF、H.264、ProRes 解码，mp4、mov、concat），全静态。工作区的主机会自动取用，不需要手动下载。
-
-          按 GPL 发布：源码和编译脚本在 \`$tag-source.tar.gz\`，编译方法见仓库的 \`ffmpeg/build.sh\`。
+          danio 渲染用的 FFmpeg $version，全静态，工作区主机自动取用。按 GPL 发布，源码和编译脚本在 \`$tag-source.tar.gz\`。
 
           <!-- lang:en -->
 
-          The FFmpeg danio uses, $version: only what danio needs (libx264 and ProRes encoding; PNG, JPEG, TIFF, H.264 and ProRes decoding; mp4, mov, concat), fully static. Workspace hosts fetch it themselves; there is nothing to download by hand.
-
-          Licensed under the GPL: the sources and the build script are in \`$tag-source.tar.gz\`; the recipe is \`ffmpeg/build.sh\` in this repository.
+          The FFmpeg danio renders with, $version, fully static; workspace hosts fetch it themselves. Licensed under the GPL: sources and build script in \`$tag-source.tar.gz\`.
           EOF
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "FFmpeg $version" --notes-file notes.md --latest=false \
