@@ -97,7 +97,9 @@ linux-amd64 | linux-arm64)
 	[ "$TARGET" = linux-arm64 ] && want=aarch64
 	[ "$(uname -m)" = "$want" ] || die "$TARGET builds natively, on $want"
 	CROSS=""
-	X264_HOST=""
+	# Alpine's gcc links static-pie: x264's assembly must be PIC too, or
+	# on aarch64 the link fails (read-only segment has dynamic relocations)
+	X264_HOST="--enable-pic"
 	FF_CROSS=""
 	;;
 windows-amd64)
