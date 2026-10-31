@@ -20,6 +20,11 @@ name: FFmpeg
 # Secrets: DANIO_SIGNING_KEY, the release key (PEM), as for danio's releases.
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the release (off - build and check only)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -32,6 +37,7 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     strategy:
+      fail-fast: false
       matrix:
         include:
           - { target: linux-amd64, runner: ubuntu-24.04, apk: "" }
@@ -65,6 +71,7 @@ jobs:
     name: Check (${{ matrix.target }})
     needs: build
     strategy:
+      fail-fast: false
       matrix:
         include:
           - { target: linux-amd64, runner: ubuntu-24.04, exe: ffmpeg }
@@ -93,6 +100,7 @@ jobs:
   release:
     name: Publish
     needs: check
+    if: inputs.publish
     runs-on: ubuntu-24.04
     permissions:
       contents: write

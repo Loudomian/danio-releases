@@ -157,8 +157,9 @@ PKG_CONFIG_PATH="$P/lib/pkgconfig" ./configure \
 	--enable-parser=png,mjpeg,h264 \
 	--enable-encoder=libx264,prores_ks \
 	--enable-muxer=mp4,mov \
-	--enable-filter=pad,scale,format,null 	--enable-bsf=h264_mp4toannexb \
-	>"$B/configure.log" 2>&1 || { tail -40 "$B/configure.log" >&2; die "FFmpeg configure failed (log above)"; }
+	--enable-filter=pad,scale,format,null \
+	--enable-bsf=h264_mp4toannexb \
+	>"$B/configure.log" 2>&1 || { tail -40 "$B/configure.log" >&2; tail -60 ffbuild/config.log >&2; die "FFmpeg configure failed (log above)"; }
 make -j"$JOBS" >"$B/make.log" 2>&1 || { tail -40 "$B/make.log" >&2; die "FFmpeg build failed (log above)"; }
 
 PKG=$B/$NAME-$TARGET
