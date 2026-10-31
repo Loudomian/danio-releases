@@ -1,0 +1,137 @@
+name: FFmpeg
+
+# Builds danio's FFmpeg and publishes it here (danio's 01-ARCHITECTURE §10):
+# a small, fully static ffmpeg for the four platforms danio runs on, which
+# each workspace's host fetches into its store as the FFmpeg resource pack.
+# The recipe is ffmpeg/build.sh, here in the open with the sources it
+# builds, as the GPL asks; its versions say what is built and the tag.
+#
+# Each build is checked on its own platform's runner (ffmpeg/check.py:
+# fragments as danio encodes them, joined as danio joins them) before
+# anything is published. The release is tagged ffmpeg-<version>, is never
+# "latest" and has no release.json: danio's update feeds only take v-tags
+# with a signed release.json, so it is never offered as a danio version.
+# It carries ffmpeg.json, signed with the release key, which is what the
+# hosts read.
+#
+# Run by hand: Actions → FFmpeg → Run workflow. A tag already published is
+# left alone: change the recipe's REVISION (or the FFmpeg version) first.
+#
+# Secrets: DANIO_SIGNING_KEY, the release key (PEM), as for danio's releases.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LLVM_MINGW: "20261020"
+  LLVM_MINGW_SHA256: 55064b60b991a1e1e8090b8c2f84e82b22cfe5903d12c159d65064cf5e8ae335
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    strategy:
+      matrix:
+        include:
+          - { target: linux-amd64, runner: ubuntu-24.04, apk: "" }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm, apk: "" }
+          - { target: windows-amd64, runner: ubuntu-24.04, apk: mingw-w64-gcc }
+          - { target: windows-arm64, runner: ubuntu-24.04, apk: "" }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build on Alpine
+        if: matrix.target != 'windows-arm64'
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w alpine:3.24 sh -c \
+            "apk add -q bash build-base nasm git perl pkgconf curl linux-headers coreutils xz tar ${{ matrix.apk }} &&
+             sh ffmpeg/build.sh ${{ matrix.target }} out"
+      - name: Build with llvm-mingw
+        if: matrix.target == 'windows-arm64'
+        run: |
+          name=llvm-mingw-$LLVM_MINGW-ucrt-ubuntu-22.04-x86_64
+          curl -fsSL -o llvm-mingw.tar.xz "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW/$name.tar.xz"
+          echo "$LLVM_MINGW_SHA256  llvm-mingw.tar.xz" | sha256sum -c -
+          tar xJf llvm-mingw.tar.xz
+          PATH="$PWD/$name/bin:$PATH" sh ffmpeg/build.sh windows-arm64 out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: out/*.tar.gz
+          if-no-files-found: error
+
+  check:
+    name: Check (${{ matrix.target }})
+    needs: build
+    strategy:
+      matrix:
+        include:
+          - { target: linux-amd64, runner: ubuntu-24.04, exe: ffmpeg }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm, exe: ffmpeg }
+          - { target: windows-amd64, runner: windows-latest, exe: ffmpeg.exe }
+          - { target: windows-arm64, runner: windows-11-arm, exe: ffmpeg.exe }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: out
+      - name: Check
+        run: |
+          tag=$(sh ffmpeg/build.sh tag)
+          tar -C out -xzf "out/$tag-${{ matrix.target }}.tar.gz"
+          python ffmpeg/check.py "out/$tag-${{ matrix.target }}/${{ matrix.exe }}" "${tag#ffmpeg-}"
+
+  release:
+    name: Publish
+    needs: check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Sources, sums and ffmpeg.json
+        env:
+          DANIO_SIGNING_KEY: ${{ secrets.DANIO_SIGNING_KEY }}
+        run: |
+          tag=$(sh ffmpeg/build.sh tag)
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::$tag is already published: change REVISION in ffmpeg/build.sh first"
+            exit 1
+          fi
+          sh ffmpeg/build.sh source out
+          rm -rf out/work
+          (cd out && sha256sum *.tar.gz >SHA256SUMS)
+          node ffmpeg/manifest.mjs out "${tag#ffmpeg-}" "$tag"
+      - name: Publish
+        run: |
+          tag=$(sh ffmpeg/build.sh tag)
+          version=${tag#ffmpeg-}
+          cat >notes.md <<EOF
+          danio 使用的 FFmpeg $version：只编进 danio 用到的部分（libx264、ProRes 编码，PNG、JPEG、TIFF、H.264、ProRes 解码，mp4、mov、concat），全静态。工作区的主机会自动取用，不需要手动下载。
+
+          按 GPL 发布：源码和编译脚本在 \`$tag-source.tar.gz\`，编译方法见仓库的 \`ffmpeg/build.sh\`。
+
+          <!-- lang:en -->
+
+          The FFmpeg danio uses, $version: only what danio needs (libx264 and ProRes encoding; PNG, JPEG, TIFF, H.264 and ProRes decoding; mp4, mov, concat), fully static. Workspace hosts fetch it themselves; there is nothing to download by hand.
+
+          Licensed under the GPL: the sources and the build script are in \`$tag-source.tar.gz\`; the recipe is \`ffmpeg/build.sh\` in this repository.
+          EOF
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "FFmpeg $version" --notes-file notes.md --latest=false \
+            out/*.tar.gz out/SHA256SUMS out/ffmpeg.json out/ffmpeg.json.sig
